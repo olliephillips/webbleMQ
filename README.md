@@ -10,6 +10,7 @@ Console mode - All devices listen to input from the console. Programtically cont
 
 ## Roadmap
 HTTP Proxy. Have Pucks listen for intructions over HTTP
+
 MQTT Gateway. Have Pucks publish to MQTT and subscribe to each other (possibly direct from browser to broker using [this](http://test.mosquitto.org/ws.html) 
 
 ## Contributions
