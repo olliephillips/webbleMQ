@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>WebbleMQ, BLE to MQTT gateway</title>
+		<link href="https://fonts.googleapis.com/css?family=Oswald|Slabo+27px" rel="stylesheet">
+		<script src="//use.fontawesome.com/45bd5d1190.js"></script>
+		<style>
+			body{font-family: 'Slabo 27px', serif;background-color:#B1EFC1; color:#333333}
+			h1 {font-family: 'Oswald', sans-serif;font-size:42px;margin-bottom:30px;}
+			h2 {font-family: 'Slabo 27px', sans-serif;font-size:18px;}
+			#wrapper{width:960px;margin-left:auto;margin-right:auto;}
+			#header, #connect-button, #logging-section, #connected-devices{text-align:center;margin-bottom:30px;}
+			button {font-family: 'Oswald', serif; border:none;text-transform:uppercase;cursor:pointer;}
+			button#connect{width:200px;height:50px;font-size:20px;background-color:#0082FC; color:#DEF4E4;}
+			button#connect i {margin-right:15px;}
+			textarea{font-family:monospace;border:none;width:100%;font-size:14px;padding:10px;background-color:#DEF4E4}
+			button.disconnect{width:30px;height:30px;font-size:14px;background-color:#CA0000;color:#DEF4E4 }
+			table {width:100%;}
+			table th {background-color:#2FB552; padding:10px;}
+			.clear{clear:both;}
+			.hidden{display:none;}
+		</style>
+	</head>
+	<body>
+		<div id="wrapper">
+
+			<div id="header">
+				<h1>WebbleMQ</h1>
+				<h2>Web bluetooth message relaying for NORDIC UART service.</h2>
+				<script>
+			
+				document.write("<p>Web Bluetooth " + (navigator.bluetooth?'enabled':'not enabled') + "  on this computer.</p>");
+			
+				</script>
+			</div>
+		
+			<div id="logging-section">
+				<div><textarea id="log" rows="5" disabled></textarea></div>
+			</div>
+
+			<div id="connect-button">
+				<button id="connect"><i class="fa fa-bluetooth" aria-hidden="true"></i> Connect</button>
+			</div>
+
+			<div id="console-section" class="hidden">
+				<h2>Console</h2>
+				<div>
+					<textarea id="console-input" rows="1">></textarea>
+				</div>
+			</div>
+
+			<div id="connected-devices-header">
+							<div style="float:left;">
+								<h2>Connected devices</h2>
+							</div>
+							<div style="float:right;">
+								<p style="margin-top:20px;">Mode: <select id="mode">
+									<!-- Sort the opt values Ollie -->
+										<option value="relay">Relay (Master/Slave)</option>
+										<option value="console">Console (Command all)</option>
+										<!--
+										<option value="proxy">HTTP Proxy (Poll web page) - not implemented</option>
+										<option value="mqtt-u">MQTT (Unannounced) - not implemented</option>
+										<option value="mqtt-a">MQTT (Announced) - not implemented</option>
+										-->
+									</select></p>
+							</div>
+							<div class="clear"></div>	
+			</div>
+			<div id="connected-devices">
+				<div>
+						<table id="device-listing">
+							<tr><th>Device</th><th class="mqtt hidden">Publishing on</th><th class="mqtt hidden">Subscribed to</th><th class="relay">Master</th><th class="relay">Slave</th><th class="console hidden">Console</th><th>&nbsp;</th></tr>
+						</table>	
+				</div>
+
+			</div>
+		</div>
+
+		<script>	
+
+		// WebbleMQ 	
+		class Webblemq {
+
+			constructor() {
+				this.device = null;
+				this.onDisconnected = this.onDisconnected.bind(this);
+
+				// Nordic UART service and characteristics
+				this.nUART = {
+					serviceUUID: '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+					txUUID: '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+					rxUUID: '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
+				};
+
+				// For TX and RX chunking
+				this.chunked = [];
+				this.chunkedRX = [];
+			}
+
+			// String utils
+			str2ab(str) {
+				var buf = new ArrayBuffer(str.length);
+				var bufView = new Uint8Array(buf);
+				for (var i=0, strLen=str.length; i<strLen; i++) {
+					bufView[i] = str.charCodeAt(i);
+				}
+				return buf;
+			}
+
+			ab2str(buf) {
+				var str = String.fromCharCode.apply(null, new Uint8Array(buf));
+				return str;
+			}
+			
+			request() {
+				let options = {
+					"filters": [{
+						"services": [this.nUART.serviceUUID]
+						}]
+				};
+				return navigator.bluetooth.requestDevice(options)
+				.then(device => {
+					this.device = device;
+					this.device.addEventListener('gattserverdisconnected', this.onDisconnected);
+				});
+			}
+			
+			// logging util can see to textarea on page
+			log(msg, textareaID) {
+				var msgfmt = msg.replace("\n", "");
+					if(textareaID){
+						var log = document.getElementById(textareaID); // textarea
+						var update = log.innerHTML + "> " + msgfmt + "\n";
+						log.innerHTML = update;
+						log.scrollTop = log.scrollHeight;
+					}
+					// Output to console
+					console.log(msgfmt);
+			}
+
+			connect() {
+				if (!this.device) {
+					return Promise.reject('Device is not connected.');
+				}
+				return this.device.gatt.connect();
+			}
+
+			writeChunks() {
+
+				return this.device.gatt.getPrimaryService(this.nUART.serviceUUID)
+				.then(service => service.getCharacteristic(this.nUART.txUUID))
+				.then(characteristic => {
+					//console.log("Sending " + this.chunked[0]);
+					characteristic.writeValue(this.str2ab(this.chunked[0]))
+					.then(_ => {
+						this.chunked.shift(); // delete first
+						if(this.chunked.length > 0) {
+							this.writeChunks();
+						} else {
+							characteristic.writeValue(this.str2ab("\n"));
+						}
+					});
+				});
+			}
+
+			writeTX(data) {
+				// Chunk the data and store
+				this.chunked = data.match(/.{1,20}/g);
+				this.writeChunks().then(_ =>{
+					this.log("'" + data + "' sent to " + this.device.name, "log");
+				});	
+			}
+			
+			startRXNotifications(listener) {
+				return this.device.gatt.getPrimaryService(this.nUART.serviceUUID)
+				.then(service => service.getCharacteristic(this.nUART.rxUUID))
+				.then(characteristic => characteristic.startNotifications())
+				.then(characteristic => characteristic.addEventListener('characteristicvaluechanged', listener));
+			}
+			
+			disconnect() {
+				if (!this.device) {
+					return Promise.reject('Device is not connected.');
+				}
+				return this.device.gatt.disconnect();
+			}
+
+			onDisconnected() {
+				// Delete tracked instance
+				this.log(this.device.name + ' is disconnected.', "log");
+				delete device[this.device.id];
+				var deviceRow = document.getElementById('device-'+ this.device.id);
+				deviceRow.remove();
+			}
+
+	}
+
+//  Reference object for connected devices
+var device = {};
+var pub = {};
+var sub = {};
+var buffered = {
+};
+
+
+var wmq = {	
+	sending : false,
+
+	connect : function(){
+		// Connect to device and set up RX listener
+		// Asign device to device object for control
+		var webblemq = new Webblemq();
+		webblemq.request()
+		.then(_ => webblemq.connect())
+		.then(_ => {
+			// Connected
+			webblemq.log("Connected to " + webblemq.device.name +" (ID: " + webblemq.device.id + ")" , "log");
+			// Set echo false
+			webblemq.writeTX("echo(0);");
+			// Add to table
+			wmq.createTableEntry(webblemq.device);
+			// RX callback
+			webblemq.startRXNotifications(function(d){
+				// RX Handler
+				wmq.bufferHandler(webblemq.device.id, d.target.value.buffer);
+			});
+			// Assign device to device object
+			device[webblemq.device.id] = webblemq;
+		})
+		.catch(error => { console.log(error) });
+	},
+
+	disconnect : function(){
+		var deviceID = this.getAttribute("value");
+		console.log(deviceID);
+		device[deviceID].disconnect();
+	},
+
+	bufferHandler : function(id, buffer) {
+		if (!wmq.sending) {
+			// We could have incomimg RX from multiple devices
+			// Need to track it and piece back together to relay as a message
+
+			var chunk = new Uint8Array(buffer);
+			var strChunk = String.fromCharCode.apply(null, chunk);
+
+			if (id in buffered) {
+				console.log("Adding to existing buffered obj");
+				// If it is, append to array held here
+				console.log(chunk);
+				buffered[id] = buffered[id].concat(strChunk);
+				// If contains \n then recall whole array and send to mshHandler
+				if (chunk.indexOf(10) > -1) {
+					console.log("contains linebreak, writing buffered obj");
+					console.log(buffered[id]);
+					wmq.msgHandler(id, buffered[id]);
+					delete buffered[id];
+				}
+			} else {
+				// if ID not in sub object then start new array and Assign
+				if (chunk.indexOf(10) > -1) {
+					// Why is above true?
+					console.log("Writing immediately");
+					// If contains \n then send immediately to msgHandler	
+					wmq.msgHandler(id, strChunk);
+				} else {
+					console.log("Creating new buffered obj");
+					// If id not in sub object then start new array by assigning buffer
+					console.log(chunk);
+					buffered[id] = strChunk;
+				}
+			} 
+		}
+	}, 
+
+	msgHandler : function(id, msg){
+		console.log("received from bufferhandler: " + msg);
+		var mode = document.getElementById("mode").value;
+
+		switch(mode){
+			case "relay":
+				// Local master/slave relaying
+				// Was message receive from master - if not ignore
+				// Are there slaves to receive the message - if not ignore
+				// Send message payload to slaves
+	
+				var master=document.querySelectorAll("input.master:checked");
+			
+				// Any masters - no ignore
+				if (master.length == 0) {
+					return false;
+				}
+
+				// Check a master
+				var isMaster = false;
+				master.forEach(function(el){
+					if(el.id == "master-" + id) {
+						isMaster = true;
+						device[id].log(device[id].device.name + " : " + msg, "log");
+					}
+				});
+				if(!isMaster) {
+					return false;
+				}
+
+				// At this point we have RX from a master
+				// Send to slaves
+				var slave= document.querySelectorAll("input.slave:checked");
+
+				// Any slaves - no, nobody to send to 
+				if (slave.length == 0) {
+					return false;
+				}
+				// Flag sending
+				wmq.sending = true;
+				// We have slaves send payload
+				slave.forEach(function(el){
+					var slaveID = el.id.replace("slave-", "");
+					// Check still connected
+					if (slaveID in device){
+						device[slaveID].writeTX(msg);
+					}
+				});
+				// Flag not sending
+				wmq.sending = false;
+			break;
+
+			case "console":
+				// Console mode, send input to all connected pucks
+				if(!id){
+					// Flag sending
+					wmq.sending = true;
+					for (var id in device) {
+						if (device.hasOwnProperty(id)) {
+							device[id].writeTX(msg);
+						}
+					}
+					// Flag not sending
+					wmq.sending = false;
+				}
+
+			break;
+
+		}
+		
+	},
+
+	createTableEntry : function(device){
+
+			var mode = document.getElementById("mode");
+
+			var devices = document.getElementById("device-listing");
+			var row = devices.insertRow(1);
+			row.setAttribute("id", "device-" + device.id);
+			var deviceID = row.insertCell(0);
+			var publish = row.insertCell(1);
+			var subscribe = row.insertCell(2);
+			var master = row.insertCell(3);
+			var slave = row.insertCell(4);
+			var consle = row.insertCell(5);
+			var disconnect = row.insertCell(6);
+
+			// Hide depending on mode
+
+			switch(mode.value){
+					case "relay":
+						publish.className = "mqtt hidden";
+						subscribe.className = "mqtt hidden";
+						master.className = "relay";
+						slave.className = "relay";
+						consle.className = "console hidden";
+					break;
+
+					case "console":
+						publish.className = "mqtt hidden";
+						subscribe.className = "mqtt hidden";
+						master.className = "relay hidded";
+						slave.className = "relay hidden";
+						consle.className = "console";
+					break;
+
+					case "proxy":
+
+					break;
+
+					default:
+						publish.className = "mqtt";
+						subscribe.className = "mqtt";
+						master.className = "relay hidden";
+						slave.className = "relay hidden";
+						consle.className = "console hidden";
+					break;
+
+			}
+			/*
+			if(mode.value == "relay") {
+				publish.className = "mqtt hidden";
+				subscribe.className = "mqtt hidden";
+				master.className = "relay";
+				slave.className = "relay";
+			} else {
+				publish.className = "mqtt";
+				subscribe.className = "mqtt";
+				master.className = "relay hidden";
+				slave.className = "relay hidden";
+			}*/
+			
+			// Name
+			deviceID.innerHTML = device.name;
+
+			// Publish
+			var mqttDeviceID = wmq.goodID(device.id);
+			var pubTopic = '/wmq/pub/' + mqttDeviceID;
+			publish.innerHTML = pubTopic;
+			
+			// Store
+			pub[device.id] = pubTopic;
+		
+			// Subscribe
+			var subTopic = '/wmq/sub/' + mqttDeviceID;
+			sub[device.id] = subTopic;
+			subscribe.innerHTML = wmq.buildSubscriptionOpts(device.id);
+
+			html = wmq.buildSubscriptionOpts(device.id);
+			html += '</select>';
+
+			// Master
+			master.innerHTML = '<input class="master slavemaster" type="checkbox" id="master-'+ device.id + '"/>';
+			document.getElementById("master-" + device.id).addEventListener('click', wmq.slaveMasterChange, false);
+
+			// Slave
+			slave.innerHTML = '<input class="slave slavemaster" type="checkbox" id="slave-'+ device.id + '"/>';
+			document.getElementById("slave-" + device.id).addEventListener('click', wmq.slaveMasterChange, false);
+
+			// Console
+			consle.innerHTML = "Listening for console input";
+
+			// Create disconnect button with listener
+			var btn = document.createElement("button");
+			btn.innerHTML = '<i class="fa fa-close" aria-hidden="true"></i>';
+			btn.className = "disconnect";
+			btn.setAttribute("value", device.id);
+			btn.addEventListener('click', wmq.disconnect, false);
+			disconnect.appendChild(btn);
+	
+	},
+
+	goodID : function(id) {
+		var newID = id.replace(/[\+\/=]/g, "", -1);
+		return newID.toLowerCase();
+	},
+
+	buildSubscriptionOpts : function (id) {
+		var subTopic = '/wmq/sub/' + wmq.goodID(id);
+		var html = '<select id="subscribe-' + id +'">';
+		html += '<option value="' + subTopic + '">' + subTopic + '</option>';
+
+		// Iterate pub object, don't double up on the new connection
+		for (var key in pub) {
+  		if (pub.hasOwnProperty(key)) {
+				if (key != id) {
+					html += '<option value="' + pub[key]+ '">' + pub[key] + '</option>';
+				}
+  		}
+		}
+		
+		html += '</select>';
+		return html;
+	}, 
+
+	modeChange : function(e)  {
+		var mode = document.getElementById("mode").value;
+		
+		// Console off by default
+		var consle = document.getElementById("console-section");
+		consle.classList.add("hidden");
+
+		switch(mode) {
+			case "relay": 
+
+				var mqttEls = document.querySelectorAll(".mqtt");
+				var localEls = document.querySelectorAll(".relay.hidden");
+				var consleEls = document.querySelectorAll(".console");
+		
+				// Remove hidden
+				localEls.forEach(function(el){
+					el.classList.remove('hidden');
+				});
+
+				// Add hidden
+				mqttEls.forEach(function(el){
+					el.classList.add('hidden');
+				});
+				consleEls.forEach(function(el){
+					el.classList.add('hidden');
+				});
+
+			break;
+
+			case "console":
+				// Console on
+				consle.classList.remove('hidden');
+
+				var mqttEls = document.querySelectorAll(".mqtt");
+				var localEls = document.querySelectorAll(".relay");
+				var consleEls = document.querySelectorAll(".console.hidden");
+		
+				// Remove hidden
+				consleEls.forEach(function(el){
+					el.classList.remove('hidden');
+				});
+
+				// Add hidden
+				mqttEls.forEach(function(el){
+					el.classList.add('hidden');
+				});
+				localEls.forEach(function(el){
+					el.classList.add('hidden');
+				});
+			break;
+
+			case "proxy":
+
+			break;
+
+			default:
+
+				// Both MQTT options
+				var mqttEls = document.querySelectorAll(".mqtt.hidden");
+				var localEls = document.querySelectorAll(".relay");
+				var consleEls = document.querySelectorAll(".console");
+
+				// Remove hidden
+				mqttEls.forEach(function(el){
+					el.classList.remove('hidden');
+				});
+
+				// Add hidden
+				localEls.forEach(function(el){
+					el.classList.add('hidden');
+				});	
+
+				// Add hidden
+				consleEls.forEach(function(el){
+					el.classList.add('hidden');
+				});	
+
+			break;
+
+		}
+	
+	},
+
+	slaveMasterChange : function() {
+		// For relay mode
+		var elID= this.getAttribute("id");
+		var status = this.checked;
+		var deviceID;
+		if (elID.indexOf("master") > -1) {
+			deviceID = elID.replace("master-","");
+			if(status) {
+				document.getElementById("slave-" + deviceID).checked = false;
+				// Enable echo
+				wmq.echo(deviceID, true);
+			} else {
+				document.getElementById("slave-" + deviceID).checked = true;
+				// Disable echo
+				wmq.echo(deviceID, false);
+			}
+		} else {
+			deviceID = elID.replace("slave-","");
+			if(status) {
+				document.getElementById("master-" + deviceID).checked = false;
+				// Disable echo
+				wmq.echo(deviceID, false);
+			} else {
+				document.getElementById("master-" + deviceID).checked = true;
+				// Enable echo
+				wmq.echo(deviceID, true);
+			}
+		}
+	},
+
+	echo : function(id, on) {
+		// Switch console echo on/off
+		var cmd = 'echo(0);\n';
+		if (on){
+			cmd = 'echo(1);\n';
+		}
+		device[id].writeTX(cmd);
+	},
+
+	consoleInput : function(e) {
+			if (e.keyCode == 13) {
+				var ta = document.getElementById("console-input");
+				var buffer = ta.value.replace(">","");
+				console.log(buffer);
+				wmq.msgHandler(null, buffer);
+				// Clear/reset
+				ta.value = ">";
+			}
+	}
+}	
+
+// Connect button listener
+document.querySelector('#connect').addEventListener('click', _ => wmq.connect());
+
+// Mode change listener
+document.querySelector('#mode').addEventListener('change', _ => wmq.modeChange());
+
+// Console CR listener
+document.querySelector('#console-input').addEventListener('keyup', _ => wmq.consoleInput(event));
+
+</script>	
+</body>
+</html>
