@@ -4,11 +4,9 @@
 My experiments with Web Bluetooth. Designed primarily for use with Puck.js, supports currently supports `Relay` and `Console` mode.
 It should be possible to add a HTTP gateway and MQTT proxy, but likely a server backend required.
 
-### Relay mode
-One device as master can control several devices as slave. For example turning LEDs on
+Relay mode - One device as master can control several devices as slave. For example turning LEDs on
 
-### Console mode
-All devices listen to input from the console. Programtically control several devices at one
+Console mode - All devices listen to input from the console. Programtically control several devices at one
 
 ## Roadmap
 HTTP Proxy. Have Pucks listen for intructions over HTTP
