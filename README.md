@@ -4,7 +4,8 @@
 [Application is running here](https://olliephillips.github.io/webbleMQ/)
 
 My experiments with Web Bluetooth. Designed primarily for use with Puck.js. Currently supports `Relay` and `Console` mode.
-It should be possible to add a HTTP gateway and MQTT proxy, but likely a server backend required.
+Started implementing MQTT over websocket - currently subscription to self only.
+It should be possible to add a HTTP gateway with CORS but likely a server backend required.
 
 Relay mode - One device as master can control several devices as slave. For example turning LEDs on and off with a program running on master device such as this:
 
@@ -22,10 +23,11 @@ setInterval(function(){
 
 Console mode - All devices listen to input from the console. Programtically control several devices at once.
 
+MQTT mode - currently both unannounced and announced mode do same thing - you can publish messages to each puck on the MQTT topic to which it is subscribed. More to come.
+
 ## Roadmap
 HTTP Proxy. Have Pucks listen for intructions over HTTP
-
-MQTT Gateway. Have Pucks publish to MQTT and subscribe to each other (possibly direct from browser to broker using [this](http://test.mosquitto.org/ws.html) 
+MQTT publishing, subscribe to each other. Announced mode
 
 ## Contributions
 Are welcome!
