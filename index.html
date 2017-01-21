@@ -4,6 +4,7 @@
 		<title>WebbleMQ, BLE to MQTT gateway</title>
 		<link href="https://fonts.googleapis.com/css?family=Oswald|Slabo+27px" rel="stylesheet">
 		<script src="//use.fontawesome.com/45bd5d1190.js"></script>
+		<script src="https://olliephillips.github.io/webbleMQ/mosquitto.js"></script>
 		<style>
 			body{font-family: 'Slabo 27px', serif;background-color:#B1EFC1; color:#333333}
 			h1 {font-family: 'Oswald', sans-serif;font-size:42px;margin-bottom:30px;}
@@ -60,9 +61,10 @@
 										<option value="console">Console (Command all)</option>
 										<!--
 										<option value="proxy">HTTP Proxy (Poll web page) - not implemented</option>
-										<option value="mqtt-u">MQTT (Unannounced) - not implemented</option>
-										<option value="mqtt-a">MQTT (Announced) - not implemented</option>
 										-->
+										<option value="mqtt-u">MQTT (Unannounced)</option>
+										<option value="mqtt-a">MQTT (Announced) - not implemented</option>
+										
 									</select></p>
 							</div>
 							<div class="clear"></div>	
@@ -192,6 +194,9 @@
 				delete device[this.device.id];
 				var deviceRow = document.getElementById('device-'+ this.device.id);
 				deviceRow.remove();
+				
+				// Delete MQTT object
+				delete devMQTT[this.device.id];
 			}
 
 	}
@@ -200,8 +205,8 @@
 var device = {};
 var pub = {};
 var sub = {};
-var buffered = {
-};
+var buffered = {};
+var devMQTT = {};
 
 
 var wmq = {	
@@ -227,6 +232,35 @@ var wmq = {
 			});
 			// Assign device to device object
 			device[webblemq.device.id] = webblemq;
+
+			// Setup MQTT connection
+			devMQTT[webblemq.device.id] = new Mosquitto();
+
+			// Check mode
+			var mode = document.getElementById("mode").value;
+			
+			devMQTT[webblemq.device.id].onconnect = function(rc){
+				webblemq.log(webblemq.device.name + ": CONNACK " + rc, "log");
+			};
+
+			devMQTT[webblemq.device.id].ondisconnect = function(rc){
+				webbblemq.log(webblemq.device.name + ": Disconnected from MQTT broker","log");
+			};
+
+			// This is the main thing we're interested in here
+			devMQTT[webblemq.device.id].onmessage = function(topic, payload, qos){
+				webblemq.log("MQTT message: " + topic + " - " + payload, "log");
+				// Straight to msgHandler
+				// Because we know the ID of device subscribed we don't have to parse the topic so leave here
+				wmq.msgHandler(webblemq.device.id, payload);
+			};
+
+			// If we are already operating MQTT mode then we need to connect and subscribe
+			var mode = document.getElementById("mode").value;
+			if (mode=="mqtt-u" || mode=="mqtt-a") {
+				wmq.mqtt.connectSubscribe(webblemq.device.id);
+			}
+
 		})
 		.catch(error => { console.log(error) });
 	},
@@ -238,13 +272,15 @@ var wmq = {
 	},
 
 	bufferHandler : function(id, buffer) {
+		var mode = document.getElementById("mode").value;
 		if (!wmq.sending) {
 			// We could have incomimg RX from multiple devices
 			// Need to track it and piece back together to relay as a message
 
+		
 			var chunk = new Uint8Array(buffer);
 			var strChunk = String.fromCharCode.apply(null, chunk);
-
+			
 			if (id in buffered) {
 				console.log("Adding to existing buffered obj");
 				// If it is, append to array held here
@@ -341,6 +377,18 @@ var wmq = {
 				}
 
 			break;
+
+			default: 
+				// MQTT Handler
+				// As simple as sending to the device who's ID we have?
+				wmq.sending = true;
+				device[id].writeTX(msg);
+				wmq.sending = false;
+				//device[id].writeTX(msg);
+				//device[id].writeTX("echo(1);");
+
+			break;
+
 
 		}
 		
@@ -458,11 +506,11 @@ var wmq = {
 
 		// Iterate pub object, don't double up on the new connection
 		for (var key in pub) {
-  		if (pub.hasOwnProperty(key)) {
+  			if (pub.hasOwnProperty(key)) {
 				if (key != id) {
 					html += '<option value="' + pub[key]+ '">' + pub[key] + '</option>';
 				}
-  		}
+  			}
 		}
 		
 		html += '</select>';
@@ -546,6 +594,13 @@ var wmq = {
 					el.classList.add('hidden');
 				});	
 
+				// Create MQTT connection and the subscriptions;
+				for (var key in devMQTT) {
+  					if (devMQTT.hasOwnProperty(key)) {
+						wmq.mqtt.connectSubscribe(key);  
+  					}
+				}
+
 			break;
 
 		}
@@ -600,8 +655,20 @@ var wmq = {
 				// Clear/reset
 				ta.value = ">";
 			}
+	},
+
+	mqtt : {
+		connectSubscribe: function(key){
+			var broker =  "wss://iot.eclipse.org:443/ws";
+			// Connect  			
+			devMQTT[key].connect(broker);
+			// Subscribe
+			var sub = document.getElementById('subscribe-' + key).value;
+			console.log("Subscribe to " + sub);
+			devMQTT[key].subscribe(sub, 0);
+		}	
 	}
-}	
+}
 
 // Connect button listener
 document.querySelector('#connect').addEventListener('click', _ => wmq.connect());
