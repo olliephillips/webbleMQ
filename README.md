@@ -3,11 +3,7 @@
 
 [Application is running here](https://olliephillips.github.io/webbleMQ/)
 
-My experiments with Web Bluetooth. Designed primarily for use with Puck.js. Currently supports `Relay` and `Console` mode.
-
-Started implementing MQTT over websocket - both publishing and subscription supported.
-
-It should be possible to add a HTTP gateway with CORS but likely a server backend required.
+My experiments with Web Bluetooth. Designed primarily for use with Puck.js. Currently supports `Relay`, `Console` and `MQTT (Unannounced)` mode.
 
 Relay mode - One device as master can control several devices as slave. For example turning LEDs on and off with a program running on master device such as this:
 
@@ -25,11 +21,13 @@ setInterval(function(){
 
 Console mode - All devices listen to input from the console. Programtically control several devices at once.
 
-MQTT mode - currently both unannounced and announced mode do same thing. Each device has a publish and subsribe topic of its own at moment. I've tested both publishing and subsription listeners with two connected devices.
+MQTT mode - currently both unannounced and announced mode do same thing. Each device has a publish and subsribe topic of its own at moment. I've tested both publishing and subsription listeners with two connected devices. The plan for announced mode is that connected pucks announce what topic they are publishing on and listened to.
+
+Note MQTT uses a public MQTT broker - iot.eclipse.org. You could fork the repo and change this to a broker of your choosing, but authentication is not supported.
 
 ## Roadmap
-HTTP Proxy. Have Pucks listen for intructions over HTTP
-MQTT subscribe to each other. Announced mode
+- HTTP Proxy. Have Pucks listen for intructions over HTTP, may assume HTTP resource controlled so a CORS policy can be set. This way can do it all on the client - no server.
+- MQTT subscribe to each other. Announced mode
 
 ## Contributions
 Are welcome!
