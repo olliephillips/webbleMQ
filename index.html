@@ -20,6 +20,9 @@
 			table th {background-color:#2FB552; padding:10px;}
 			.clear{clear:both;}
 			.hidden{display:none;}
+			#mqtt-announced-banner{padding:10px;background-color:orange;text-align:center;margin-bottom:10px;font-size:16px;color:#FFFFFF;}
+			#warn-announced{background:darkorange;color:white;padding:5px;margin:2px;}
+			#mqtt-section{text-align:center; background-color:#2FB552;padding:10px;font-size:20px;margin:2px;}
 		</style>
 	</head>
 	<body>
@@ -69,6 +72,16 @@
 							</div>
 							<div class="clear"></div>	
 			</div>
+			<div id="mqtt-announced-banner" class="hidden">
+				<i style="margin-right:20px;" class="fa fa-exclamation-triangle"></i> MQTT topics published and subscribed to will be advertised here <span id="warn-announced">/wmq/playing</span>. Could be fun, but use "unannounced" mode if not desired.
+			</div>	
+
+			<div id="mqtt-section" class="hidden">
+				<div>
+					MQTT Broker : iot.eclipse.org
+				</div>
+			</div>
+
 			<div id="connected-devices">
 				<div>
 						<table id="device-listing">
@@ -250,9 +263,10 @@ var wmq = {
 			// This is the main thing we're interested in here
 			devMQTT[webblemq.device.id].onmessage = function(topic, payload, qos){
 				webblemq.log("MQTT message: " + topic + " - " + payload, "log");
-				// Straight to msgHandler
-				// Because we know the ID of device subscribed we don't have to parse the topic so leave here
-				wmq.msgHandler(webblemq.device.id, payload);
+				// Straight to device 
+				wmq.sending = true;
+				device[webblemq.device.id].writeTX(payload);
+				wmq.sending = false;
 			};
 
 			// If we are already operating MQTT mode then we need to connect and subscribe
@@ -379,16 +393,9 @@ var wmq = {
 			break;
 
 			default: 
-				// MQTT Handler
-				// As simple as sending to the device who's ID we have?
-				wmq.sending = true;
-				device[id].writeTX(msg);
-				wmq.sending = false;
-				//device[id].writeTX(msg);
-				//device[id].writeTX("echo(1);");
-
+				// MQTT Handler for publishing on device pub topic				
+				wmq.mqtt.publish(id, msg);
 			break;
-
 
 		}
 		
@@ -441,18 +448,6 @@ var wmq = {
 					break;
 
 			}
-			/*
-			if(mode.value == "relay") {
-				publish.className = "mqtt hidden";
-				subscribe.className = "mqtt hidden";
-				master.className = "relay";
-				slave.className = "relay";
-			} else {
-				publish.className = "mqtt";
-				subscribe.className = "mqtt";
-				master.className = "relay hidden";
-				slave.className = "relay hidden";
-			}*/
 			
 			// Name
 			deviceID.innerHTML = device.name;
@@ -461,6 +456,7 @@ var wmq = {
 			var mqttDeviceID = wmq.goodID(device.id);
 			var pubTopic = '/wmq/pub/' + mqttDeviceID;
 			publish.innerHTML = pubTopic;
+			publish.setAttribute("id","pub-"+device.id);
 			
 			// Store
 			pub[device.id] = pubTopic;
@@ -522,7 +518,11 @@ var wmq = {
 		
 		// Console off by default
 		var consle = document.getElementById("console-section");
+		var mqttS = document.getElementById("mqtt-section");
+		var annBanner = document.getElementById("mqtt-announced-banner");
 		consle.classList.add("hidden");
+		mqttS.classList.add("hidden");
+		annBanner.classList.add("hidden");
 
 		switch(mode) {
 			case "relay": 
@@ -574,6 +574,9 @@ var wmq = {
 
 			default:
 
+				// Console on
+				mqttS.classList.remove('hidden');
+
 				// Both MQTT options
 				var mqttEls = document.querySelectorAll(".mqtt.hidden");
 				var localEls = document.querySelectorAll(".relay");
@@ -600,6 +603,11 @@ var wmq = {
 						wmq.mqtt.connectSubscribe(key);  
   					}
 				}
+
+				// If MQTT Announced do some extra stuff
+				if(mode == "mqtt-a") {
+					annBanner.classList.remove("hidden");
+				} 
 
 			break;
 
@@ -658,7 +666,7 @@ var wmq = {
 	},
 
 	mqtt : {
-		connectSubscribe: function(key){
+		connectSubscribe: function(key) {
 			var broker =  "wss://iot.eclipse.org:443/ws";
 			// Connect  			
 			devMQTT[key].connect(broker);
@@ -666,7 +674,12 @@ var wmq = {
 			var sub = document.getElementById('subscribe-' + key).value;
 			console.log("Subscribe to " + sub);
 			devMQTT[key].subscribe(sub, 0);
-		}	
+		},
+		publish: function(key, msg) {
+			var topic = document.getElementById('pub-' + key).innerHTML;
+			devMQTT[key].publish(topic, msg, 0);
+			device[key].log(device[key].device.name + ": published to '" + topic + "'", "log");
+		}
 	}
 }
 
