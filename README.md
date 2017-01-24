@@ -3,7 +3,7 @@
 
 [Application is running here](https://olliephillips.github.io/webbleMQ/)
 
-My experiments with Web Bluetooth. Designed primarily for use with Puck.js. Currently supports `Relay`, `Console` and `MQTT (Unannounced)` mode.
+My experiments with Web Bluetooth. Designed primarily for use with Puck.js. Currently supports `Relay`, `Console` and two `MQTT` modes.
 
 Relay mode - One device as master can control several devices as slave. For example turning LEDs on and off with a program running on master device such as this:
 
@@ -21,13 +21,15 @@ setInterval(function(){
 
 Console mode - All devices listen to input from the console. Programtically control several devices at once.
 
-MQTT mode - currently both unannounced and announced mode do same thing. Each device has a publish and subsribe topic of its own at moment. I've tested both publishing and subsription listeners with two connected devices. The plan for announced mode is that connected pucks announce what topic they are publishing on and listened to.
+MQTT "unannounced" - Each device has own publish and subscribe topic. 
 
-Note MQTT uses a public MQTT broker - iot.eclipse.org. You could fork the repo and change this to a broker of your choosing, but authentication is not supported.
+MQTT "announced" - Each device has own publish and subscribe topic. Device advertises its presence, both the topic it is publishing on and subscribed to, every 10 seconds on a third topic: `/wmq/playing`. This topic is used by all connected devices in MQTT announced mode. 
+
+Note both MQTT modes uses a public MQTT broker - iot.eclipse.org. In unannounced mode, though hard to guess, the data is still public. In announced mode, devices actively advertise their presence. You can fork the repo and change the broker to one of your choosing, but authentication is not supported.
 
 ## Roadmap
 - HTTP Proxy. Have Pucks listen for intructions over HTTP, may assume HTTP resource controlled so a CORS policy can be set. This way can do it all on the client - no server.
-- MQTT subscribe to each other. Announced mode
+- MQTT subscribe to each other.
 
 ## Contributions
 Are welcome!
