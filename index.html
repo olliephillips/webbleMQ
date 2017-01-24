@@ -66,7 +66,7 @@
 										<option value="proxy">HTTP Proxy (Poll web page) - not implemented</option>
 										-->
 										<option value="mqtt-u">MQTT (Unannounced)</option>
-										<option value="mqtt-a">MQTT (Announced) - not implemented</option>
+										<option value="mqtt-a">MQTT (Announced)</option>
 										
 									</select></p>
 							</div>
@@ -393,8 +393,10 @@ var wmq = {
 			break;
 
 			default: 
-				// MQTT Handler for publishing on device pub topic				
+				// MQTT Handler for publishing on device pub topic
+				wmq.sending = true;				
 				wmq.mqtt.publish(id, msg);
+				wmq.sending = false;
 			break;
 
 		}
@@ -674,6 +676,19 @@ var wmq = {
 			var sub = document.getElementById('subscribe-' + key).value;
 			console.log("Subscribe to " + sub);
 			devMQTT[key].subscribe(sub, 0);
+
+			// If mode == mqtt-a then announce the topics being used on /wmq/playing
+			var mode = document.getElementById("mode").value;
+			if(mode == "mqtt-a") {
+				var announce = function(){
+					var topic = document.getElementById('pub-' + key).innerHTML;
+					var msg = '{"'+ device[key].device.name +'" : {"pub" : "' + topic + '", "sub" : "' + sub +'"}}';
+					devMQTT[key].publish("/wmq/playing", msg, 0);
+					device[key].log(device[key].device.name + ": announced presence on '/wmq/playing'", "log");
+				}
+				announce();
+				setInterval(announce,10000);
+			}
 		},
 		publish: function(key, msg) {
 			var topic = document.getElementById('pub-' + key).innerHTML;
